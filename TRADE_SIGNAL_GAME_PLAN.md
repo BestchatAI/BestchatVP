@@ -1,71 +1,74 @@
-# Trade Signal Game Plan (TradingView → BestchatVP)
+# Trade Signal Arena Plan (TradingView → BestchatVP, No Git Dependency)
 
 ## Short answer
-Yes — this is absolutely feasible.
+Yes — you can build this now.
 
 You can:
 1. Generate signals in TradingView (Pine Script alerts).
-2. Send alerts to your backend via webhook.
-3. Normalize and score them.
-4. Show only **BUY / SELL / HOLD / STOP** in your app.
-5. Turn it into a live “sports-style” game with leaderboards, streaks, and community watching.
+2. Send alerts to your backend webhook.
+3. Convert them into only **BUY / SELL / HOLD / STOP**.
+4. Show the signals only inside BestchatVP.
+5. Make it feel like a live sports game with rankings and audience activity.
+
+> This plan does **not** require Git/GitHub integration to run the product.
 
 ---
 
-## Product concept
-A real-time signal arena where users watch top markets and follow trader profiles.
+## Product vision
+A live signal arena where people watch top markets and top traders like a sport.
 
-### Markets to include
-- Crypto: BTC, ETH, SOL, etc.
-- Futures: ES, NQ, CL, GC, etc.
-- Stocks (major/liquid): AAPL, NVDA, TSLA, etc.
-- Commodities: Gold, Oil, Silver, Natural Gas.
-- Forex: EURUSD, GBPUSD, USDJPY, etc.
+### Supported market groups
+- Crypto (BTC, ETH, SOL, etc.)
+- Futures (ES, NQ, CL, GC, etc.)
+- Stocks (AAPL, NVDA, TSLA, etc.)
+- Commodities (Gold, Oil, Silver, Natural Gas)
+- Forex (EURUSD, GBPUSD, USDJPY, etc.)
 
-### Signal states shown in app
+### Only these states in UI
 - **BUY**
 - **SELL**
 - **HOLD**
 - **STOP**
 
-No strategy internals shown to end users unless you choose to reveal them.
+No strategy internals need to be shown to users.
 
 ---
 
-## High-level architecture
+## System architecture
 
 ```text
-TradingView Alert Engine (Pine Script)
+TradingView Alerts (Pine Script)
         │
         │ webhook JSON
         ▼
-BestchatVP Ingest API (/api/signals/tradingview)
+BestchatVP API: /api/signals/tradingview
         │
-        ├─ Signature/auth validation
-        ├─ Symbol normalization (BINANCE:BTCUSDT -> BTC/USDT)
-        ├─ Risk + quality checks
-        └─ State machine mapping -> BUY/SELL/HOLD/STOP
+        ├─ Validate secret/signature
+        ├─ Normalize symbol + market type
+        ├─ Deduplicate + rate limit
+        ├─ Map to BUY/SELL/HOLD/STOP
+        └─ Persist + publish
         ▼
-Signal Store (Postgres/Redis)
+Data layer (Postgres + Redis)
         │
-        ├─ Live feed
-        ├─ Rankings / streaks
-        └─ PnL simulation (optional real brokerage later)
+        ├─ Live feed stream
+        ├─ Leaderboards/streaks
+        └─ Paper PnL engine
         ▼
-App UI (feed + match view + trader leaderboard)
+BestchatVP app UI (feed + arena + profiles)
 ```
 
 ---
 
-## TradingView alert payload (recommended)
+## TradingView alert format (recommended)
 
-Use a strict JSON body in TradingView alert message template:
+Use strict JSON in TradingView alert message:
 
 ```json
 {
   "provider": "tradingview",
-  "strategy_id": "tv_breakout_v1",
-  "trader_id": "alpha_desk_01",
+  "strategy_id": "tv_momentum_v1",
+  "trader_id": "desk_alpha",
   "symbol": "BINANCE:BTCUSDT",
   "asset_class": "crypto",
   "timeframe": "15m",
@@ -76,95 +79,94 @@ Use a strict JSON body in TradingView alert message template:
   "confidence": 0.78,
   "timestamp": "{{timenow}}",
   "nonce": "{{bar_index}}",
-  "secret": "<YOUR_SHARED_SECRET>"
+  "secret": "<SHARED_SECRET>"
 }
 ```
 
-Server maps `action` into display status (`BUY/SELL/HOLD/STOP`) and ignores unknown values.
+### App mapping rule
+- If action is `BUY` -> show `BUY`
+- If action is `SELL` -> show `SELL`
+- If action is `HOLD` -> show `HOLD`
+- If action is `STOP` -> show `STOP`
+- Unknown action -> reject/log (do not display)
 
 ---
 
-## Security + trust controls
-- Require shared secret or HMAC signature.
-- Allowlist TradingView source ranges when possible.
-- Add idempotency key (`strategy_id + symbol + timeframe + timestamp + nonce`).
-- Enforce rate limits per trader/strategy.
-- Keep immutable audit logs for every signal.
+## Backend endpoint behavior
+`POST /api/signals/tradingview`
+
+Validation pipeline:
+1. Verify `secret` (or HMAC header).
+2. Verify required fields (`strategy_id`, `trader_id`, `symbol`, `action`, `timestamp`, `nonce`).
+3. Build idempotency key: `strategy_id:symbol:timeframe:timestamp:nonce`.
+4. Reject duplicates.
+5. Normalize symbol for UI display (e.g., `BINANCE:BTCUSDT` -> `BTC/USDT`).
+6. Store event, publish to real-time feed.
+
+Response:
+- `200` accepted.
+- `401` invalid auth.
+- `422` schema/action invalid.
+- `409` duplicate.
 
 ---
 
-## Game mechanics (sports-style)
-- **Live match cards**: BTC vs ETH, Bulls vs Bears style view.
-- **Trader leaderboard**: win rate, risk-adjusted score, drawdown.
-- **Streaks**: consecutive valid calls.
-- **Seasons/tournaments**: weekly and monthly cups.
-- **Badges**: “Sniper Entry”, “Risk Master”, “Macro King”.
-- **Follow mode**: users subscribe to trader feeds.
+## Sports/game experience
+- **Arena screen**: live market cards and signal momentum.
+- **Trader profiles**: track each trader's signal history.
+- **Leaderboard**: score, win rate, drawdown, consistency.
+- **Streaks**: hot/cold runs.
+- **Season mode**: weekly and monthly competitions.
+- **Follow + alerts**: users subscribe to traders/markets.
 
-### Scoring (example)
-`score = pnl_points + consistency_bonus - drawdown_penalty - overtrade_penalty`
-
-This keeps quality over raw volume.
+### Example scoring model
+`score = pnl_points + consistency_bonus - drawdown_penalty - spam_penalty`
 
 ---
 
-## Compliance / legal note (important)
-If real-money trading is enabled, regulations may apply by region:
-- investment advice rules,
-- broker/integration licensing,
-- KYC/AML,
-- futures/forex local restrictions,
-- risk disclaimers and suitability checks.
+## Paper-trading first (safer rollout)
+Launch sequence:
+1. Signals + watch-only experience.
+2. Paper trading + public stats.
+3. Optional broker execution later (region by region).
 
-A safer launch path:
-1. Start with **signal game + paper trading**.
-2. Add broker execution later per jurisdiction.
+This reduces legal and operational risk while proving product engagement.
 
 ---
 
-## MVP roadmap (fast execution)
-
-### Phase 1 (1-2 weeks)
-- TradingView webhook ingestion endpoint.
-- Normalize symbols and map to BUY/SELL/HOLD/STOP.
-- Real-time feed page in app.
-
-### Phase 2 (2-4 weeks)
-- Leaderboards + streaks + profile pages.
-- Replay mode for major signals.
-- Push notifications for followed traders.
-
-### Phase 3 (4-8 weeks)
-- Paper trading wallet + public performance stats.
-- Tournament mode.
-- Anti-manipulation scoring hardening.
-
-### Phase 4
-- Optional broker execution rails for supported regions.
+## Compliance essentials
+Before real-money execution:
+- Local investment-advice rules review.
+- KYC/AML requirements.
+- Broker and derivatives licensing checks.
+- Risk disclosures and suitability controls.
 
 ---
 
-## Data model (minimal)
+## Minimal schema
 
 ### `signals`
 - `id`
 - `trader_id`
 - `strategy_id`
-- `symbol`
+- `symbol_raw`
+- `symbol_display`
 - `asset_class`
 - `timeframe`
 - `action_raw`
-- `display_action` (BUY/SELL/HOLD/STOP)
+- `display_action` (`BUY`/`SELL`/`HOLD`/`STOP`)
 - `price`
 - `stop_price`
 - `take_profit`
 - `confidence`
-- `created_at`
+- `received_at`
 - `source_payload_json`
 
 ### `trader_scores`
 - `trader_id`
 - `period`
+- `wins`
+- `losses`
 - `win_rate`
 - `net_points`
 - `max_drawdown`
@@ -173,10 +175,24 @@ A safer launch path:
 
 ---
 
-## Recommendation for BestchatVP now
-1. Build webhook ingestion + display-state pipeline first.
-2. Launch as a spectator-first game (fast growth loop).
-3. Enable paper trade PnL and rankings.
-4. Add regulated execution only after legal readiness.
+## 14-day MVP build checklist
 
-This gives you a compelling product quickly while staying safer operationally.
+### Week 1
+- [ ] Create webhook endpoint.
+- [ ] Add secret validation + dedupe.
+- [ ] Add action mapping to BUY/SELL/HOLD/STOP.
+- [ ] Save signals in DB.
+- [ ] Build simple live feed API.
+
+### Week 2
+- [ ] Add live feed UI in app.
+- [ ] Add trader profile page.
+- [ ] Add leaderboard and streak counter.
+- [ ] Add push notifications for followed traders.
+- [ ] Deploy and monitor signal latency/errors.
+
+---
+
+## Final recommendation
+Build the **watch-first signal arena** immediately with TradingView webhooks and paper stats.
+It fits your idea of a large spectator trading game and can later expand into execution once compliance is ready.
